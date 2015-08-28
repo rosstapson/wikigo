@@ -1,9 +1,11 @@
 package main
 import (
-     "html/template"
-     "io/ioutil"
-     "net/http"
-     "regexp"
+    "html/template"
+    "net/http"
+    "regexp"
+    _ "github.com/go-sql-driver/mysql"
+    "database/sql"
+    "log"
 )
     	
 type Page struct {
@@ -12,13 +14,62 @@ type Page struct {
 }
    	
 func (p *Page) save() error {
-    filename := p.Title + ".txt"
-    return ioutil.WriteFile(filename, p.Body, 0600)
+	log.Printf("save! ZOMG.")
+	db, err := sql.Open("mysql", "ross:ross@/go_schema")
+    checkErr(err)
+    defer db.Close()
+    err = db.Ping()
+	checkErr(err)
+	
+    stmt, err := db.Prepare("INSERT page set title=?, text=?")
+    
+    if err != nil {    	
+    	return err
+    }
+    res, err := stmt.Exec(p.Title, p.Body)
+    if err != nil {
+    	return err
+    }
+    defer stmt.Close()
+    lastId, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	rowCnt, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	log.Printf("ID = %d, affected = %d\n", lastId, rowCnt)
+	return nil
 }
-   
+func getPageText(title string) ([]byte, error){
+	 	
+    var temp string
+    db, err := sql.Open("mysql", "ross:ross@/go_schema")
+    checkErr(err)
+    defer db.Close()
+
+    rows, err := db.Query("SELECT text from page where title=?", title)
+
+    if err != nil {
+    	log.Printf("nil result")
+    	return nil, err
+    }
+    defer rows.Close()
+    for rows.Next() {
+    	//log.Printf("rows.")
+    	err := rows.Scan(&temp)
+    	if err != nil {
+    		return nil, err
+    	}
+    	
+    	log.Printf(temp)    	
+    }
+    return []byte(temp), err
+}
 func loadPage(title string) (*Page, error) {
-    filename := title + ".txt"
-    body, err := ioutil.ReadFile(filename)
+   	
+    body, err := getPageText(title)
     if err != nil {
     	return nil, err
     }
@@ -78,7 +129,26 @@ func makeHandler (fn func (http.ResponseWriter, *http.Request, string)) http.Han
 		fn(w, r, m[2])
 	}
 }
+// for fatal errors
+func checkErr(err error) {
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+
+/*func getDB() *sql.DB {
+	
+	db, err := sql.Open("mysql", "ross:ross@/go_schema")
+    checkErr(err)
+    defer db.Close()
+    err = db.Ping()
+	checkErr(err)
+	
+	return db
+}*/
 func main() {
+	
+	//handler stuffs
     http.HandleFunc("/view/", makeHandler(viewHandler))
     http.HandleFunc("/edit/", makeHandler(editHandler))
     http.HandleFunc("/save/", makeHandler(saveHandler))
