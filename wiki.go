@@ -42,8 +42,29 @@ func (p *Page) save() error {
 	log.Printf("ID = %d, affected = %d\n", lastId, rowCnt)
 	return nil
 }
-func getPageText(title string) ([]byte, error){
-	 	
+func getTitles() (map[int]string, error) {
+	db, err := sql.Open("mysql", "ross:ross@/go_schema")
+	checkErr(err)
+	defer db.Close()
+	rows, err := db.Query("select id, title from page")
+	if err != nil {
+		log.Printf("no titles returned")
+		return nil, err
+	}
+	defer rows.Close()
+	titles := make(map[int]string)
+	for rows.Next() {    
+    	var name string
+    	var id int
+    	err = rows.Scan(&id, &name)
+    	if err != nil {
+    		checkErr(err)
+    	}
+    	titles[id] = name
+	}
+	return titles, err
+}
+func getPageText(title string) ([]byte, error){	 	
     var temp string
     db, err := sql.Open("mysql", "ross:ross@/go_schema")
     checkErr(err)
@@ -67,16 +88,15 @@ func getPageText(title string) ([]byte, error){
     }
     return []byte(temp), err
 }
-func loadPage(title string) (*Page, error) {
-   	
+func loadPage(title string) (*Page, error) {   	
     body, err := getPageText(title)
     if err != nil {
     	return nil, err
     }
     return &Page{Title: title, Body: body}, nil
 }
-   
-var templates = template.Must(template.ParseFiles("edit.html", "view.html"))
+
+var templates = template.Must(template.ParseFiles("edit.html", "view.html", "list.html"))
 
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
     err := templates.ExecuteTemplate(w, tmpl+".html", p)
@@ -85,11 +105,20 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
     }
 }
     
-var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)$")
+var validPath = regexp.MustCompile("^/(edit|save|view|pages)/([a-zA-Z0-9]+)$")
 
+func pagesHandler(w http.ResponseWriter, r *http.Request, title string) {
+	log.Printf("pagesHandler")
+	titles, err := getTitles()
+	checkErr(err)
+	err = templates.ExecuteTemplate(w, "list.html", titles)
+    if err != nil {
+    	checkErr(err)
+    	http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
+}
 
 func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
-
     p, err := loadPage(title)
     if err != nil {
     	http.Redirect(w, r, "/edit/"+title, http.StatusFound)
@@ -98,8 +127,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
     renderTemplate(w, "view", p)
 }
    
-func editHandler(w http.ResponseWriter, r *http.Request, title string) {
-   
+func editHandler(w http.ResponseWriter, r *http.Request, title string) {   
     p, err := loadPage(title)
     if err != nil {
     	p = &Page{Title: title}
@@ -108,7 +136,6 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 }
 
 func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
-
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
 	err := p.save()
@@ -152,6 +179,7 @@ func main() {
     http.HandleFunc("/view/", makeHandler(viewHandler))
     http.HandleFunc("/edit/", makeHandler(editHandler))
     http.HandleFunc("/save/", makeHandler(saveHandler))
+    http.HandleFunc("/pages/", makeHandler(pagesHandler))
     http.ListenAndServe(":8080", nil)
 }
  
